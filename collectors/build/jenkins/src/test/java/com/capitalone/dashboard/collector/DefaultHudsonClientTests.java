@@ -3,6 +3,7 @@ package com.capitalone.dashboard.collector;
 import com.capitalone.dashboard.model.BaseModel;
 import com.capitalone.dashboard.model.Build;
 import com.capitalone.dashboard.model.BuildStatus;
+import com.capitalone.dashboard.model.HudsonCollector;
 import com.capitalone.dashboard.model.HudsonJob;
 import com.capitalone.dashboard.model.RepoBranch;
 import com.capitalone.dashboard.model.RepoBranch.RepoType;
@@ -53,6 +54,8 @@ public class DefaultHudsonClientTests {
 
     private static final String URL_TEST = "http://server/job/job2/2/";
     private static final int PAGE_SIZE = 10;
+
+    private static final HudsonCollector collector = new HudsonCollector();
 
     @Before
     public void init() {
@@ -105,7 +108,7 @@ public class DefaultHudsonClientTests {
 		URL u = new URL(new URL("http://jenkins.com"), "/api/json?tree=jobs[name,url," +
                 "builds[number,url]]");
 
-        HttpHeaders headers = defaultHudsonClient.createHeaders("Aladdin:open sesame");
+        HttpHeaders headers = defaultHudsonClient.createHeaders("Aladdin:open sesame",null);
         assertEquals("Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==",
                 headers.getFirst(HttpHeaders.AUTHORIZATION));
     }
@@ -115,7 +118,7 @@ public class DefaultHudsonClientTests {
         //TODO: This change to clear a JAVA Warning should be correct but test fails, need to investigate
         //HttpEntity<HttpHeaders> headers = new HttpEntity<HttpHeaders>(defaultHudsonClient.createHeaders("user:pass"));
         @SuppressWarnings({ "rawtypes", "unchecked" })
-		HttpEntity headers = new HttpEntity(defaultHudsonClient.createHeaders("user:pass"));
+		HttpEntity headers = new HttpEntity(defaultHudsonClient.createHeaders("user:pass", null));
         when(rest.exchange(Matchers.any(URI.class), eq(HttpMethod.GET),
                 eq(headers), eq(String.class)))
                 .thenReturn(new ResponseEntity<>("", HttpStatus.OK));
@@ -136,7 +139,7 @@ public class DefaultHudsonClientTests {
         //TODO: This change to clear a JAVA Warnings should be correct but test fails, need to investigate
         //HttpEntity<HttpHeaders> headers = new HttpEntity<HttpHeaders>(defaultHudsonClient.createHeaders("does:matter"));
         @SuppressWarnings({ "unchecked", "rawtypes" })
-		HttpEntity headers = new HttpEntity(defaultHudsonClient.createHeaders("does:matter"));
+		HttpEntity headers = new HttpEntity(defaultHudsonClient.createHeaders("does:matter",null));
         when(rest.exchange(Matchers.any(URI.class), eq(HttpMethod.GET),
                 eq(headers), eq(String.class)))
                 .thenReturn(new ResponseEntity<>("", HttpStatus.OK));
@@ -157,7 +160,7 @@ public class DefaultHudsonClientTests {
         //TODO: This change should be correct but test fails, need to investigate
     	//HttpEntity<HttpHeaders> headers = new HttpEntity<HttpHeaders>(defaultHudsonClient.createHeaders("does:matter"));
         @SuppressWarnings({ "unchecked", "rawtypes" })
-        HttpEntity headers = new HttpEntity(defaultHudsonClient.createHeaders("does:matter"));
+        HttpEntity headers = new HttpEntity(defaultHudsonClient.createHeaders("does:matter",null));
         when(rest.exchange(Matchers.any(URI.class), eq(HttpMethod.GET),
                 eq(headers), eq(String.class)))
                 .thenReturn(new ResponseEntity<>("", HttpStatus.OK));
@@ -178,7 +181,7 @@ public class DefaultHudsonClientTests {
         when(rest.exchange(Matchers.any(URI.class), eq(HttpMethod.GET), Matchers.any(HttpEntity.class), eq(String.class)))
                 .thenReturn(new ResponseEntity<>("", HttpStatus.OK));
 
-        Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> jobs = hudsonClient.getInstanceJobs(URL_TEST);
+        Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> jobs = hudsonClient.getInstanceJobs(URL_TEST, collector);
 
         assertThat(jobs.size(), is(0));
     }
@@ -195,7 +198,7 @@ public class DefaultHudsonClientTests {
         		eq(HttpMethod.GET), Matchers.any(HttpEntity.class), eq(String.class)))
                 .thenReturn(new ResponseEntity<>("", HttpStatus.INTERNAL_SERVER_ERROR));
 
-        Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> jobs = hudsonClient.getInstanceJobs(URL_TEST);
+        Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> jobs = hudsonClient.getInstanceJobs(URL_TEST, collector);
 
         assertThat(jobs.size(), is(2));
         Iterator<HudsonJob> jobIt = jobs.keySet().iterator();
@@ -240,7 +243,7 @@ public class DefaultHudsonClientTests {
                             "}", "UTF-8"))), eq(HttpMethod.GET), Matchers.any(HttpEntity.class), eq(String.class))
         ).thenReturn(new ResponseEntity<>(getJson("instanceJobs_multibranchPipeline.json"), HttpStatus.OK));
 
-        Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> jobs = hudsonClient.getInstanceJobs(URL_TEST);
+        Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> jobs = hudsonClient.getInstanceJobs(URL_TEST, collector);
         
         assertThat(jobs.size(), is(2));
         Iterator<HudsonJob> jobIt = jobs.keySet().iterator();

@@ -98,7 +98,7 @@ public class HudsonCollectorTask extends CollectorTask<HudsonCollector> {
             logBanner(instanceUrl);
             try {
                 Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> dataByJob = hudsonClient
-                        .getInstanceJobs(instanceUrl);
+                        .getInstanceJobs(instanceUrl, collector);
                 log("Fetched jobs", start);
                 activeJobs.addAll(dataByJob.keySet());
                 addNewJobs(dataByJob.keySet(), existingJobs, collector);

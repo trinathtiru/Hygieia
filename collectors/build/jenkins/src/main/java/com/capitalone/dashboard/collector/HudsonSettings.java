@@ -27,6 +27,9 @@ public class HudsonSettings {
     @Value("${folderDepth:10}")
     private int folderDepth;
 
+    @Value("${useGroovy:false}")
+    private boolean useGroovy;
+
     public String getCron() {
         return cron;
     }
@@ -114,5 +117,13 @@ public class HudsonSettings {
 
     public int getFolderDepth() {
         return folderDepth;
+    }
+
+    public boolean isUseGroovy() {
+        return useGroovy;
+    }
+
+    public void setUseGroovy(boolean useGroovy) {
+        this.useGroovy = useGroovy;
     }
 }

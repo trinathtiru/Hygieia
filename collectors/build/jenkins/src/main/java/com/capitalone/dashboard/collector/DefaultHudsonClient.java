@@ -4,8 +4,10 @@ import com.capitalone.dashboard.model.BaseModel;
 import com.capitalone.dashboard.model.Build;
 import com.capitalone.dashboard.model.BuildStatus;
 import com.capitalone.dashboard.model.ConfigHistOperationType;
+import com.capitalone.dashboard.model.HudsonCollector;
 import com.capitalone.dashboard.model.HudsonJob;
 import com.capitalone.dashboard.model.HudsonJobConfig;
+import com.capitalone.dashboard.model.NameValue;
 import com.capitalone.dashboard.model.RepoBranch;
 import com.capitalone.dashboard.model.SCM;
 import com.capitalone.dashboard.util.Supplier;
@@ -24,6 +26,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestOperations;
 
@@ -65,7 +69,16 @@ public class DefaultHudsonClient implements HudsonClient {
     private static final String API_SUFFIX = "api/json?tree=";
     //private static final String JOB_QUERY = "jobs[name,url,builds[number,url],lastSuccessfulBuild[timestamp,builtOn],lastBuild[timestamp,builtOn]]";
     private static final String JOB_QUERY = "jobs[name,url,builds[number,url],lastSuccessfulBuild[timestamp,builtOn],lastBuild[timestamp,builtOn],actions[jobConfigHistory[currentName,date,hasConfig,job,oldName,operation,user,userID]]]";
-
+    private static final String CRUMB_QUERY = "crumbIssuer/api/json";
+    private static final String SCRIPT_SUFFIX = "scriptText";
+    private static final String JOB_LIST_SCRIPT = "Jenkins.instance.getAllItems(Job).findAll{\n" +
+            "  def jobBuilds=it.getBuilds()\n" +
+            "    jobBuilds.findAll { build ->\n" +
+            "      if (build.getTime().getTime() > %s) {\n" +
+            "       println \"${build}||${build.url}||${build.number}||${build.getTime().getTime()}\"\n" +
+            "      }\n" +
+            "    }\n" +
+            "}";
     private static final String JOBS_URL_SUFFIX = "/api/json?tree=jobs";
 
     private static final String[] CHANGE_SET_ITEMS_TREE = new String[]{
@@ -104,66 +117,111 @@ public class DefaultHudsonClient implements HudsonClient {
         this.settings = settings;
     }
 
+    private Map<HudsonJob, Map<jobData, Set<BaseModel>>> getInstanceJobsGroovy(String instanceUrl, HudsonCollector collector)  {
+        Map<HudsonJob, Map<jobData, Set<BaseModel>>> result = new LinkedHashMap<>();
+        NameValue crumb = getCrumb(instanceUrl);
+        if (crumb != null) {
+            String url  = joinURL(instanceUrl, new String[] {SCRIPT_SUFFIX});
+            ResponseEntity<String> response = null;
+            try {
+                response = makeRestCallPost(url, crumb, String.format(JOB_LIST_SCRIPT, String.valueOf(collector.getLastExecuted())));
+                String data = response.toString();
+
+            } catch (URISyntaxException e) {
+                LOG.error("Wrong syntax url for getting crumb", e);
+            }
+        }
+        return result;
+    }
+
+    private NameValue getCrumb(String instanceUrl) {
+        String url = joinURL(instanceUrl, new String[]{CRUMB_QUERY});
+        try {
+            ResponseEntity<String> responseEntity = makeRestCall(url);
+            if (responseEntity == null) {
+                return null;
+            }
+            String json = responseEntity.getBody();
+            if (StringUtils.isEmpty(json)) {
+                return null;
+            }
+            JSONParser parser = new JSONParser();
+            JSONObject object = (JSONObject) parser.parse(json);
+            NameValue crumb = new NameValue(getString(object, "crumbRequestField"), getString(object, "crumb"));
+            return crumb;
+
+        } catch (URISyntaxException e1) {
+            LOG.error("Wrong syntax url for getting crumb", e1);
+        } catch (ParseException e) {
+            LOG.error("Parsing crumb details on instance: " + instanceUrl, e);
+        }
+        return null;
+    }
+
+
     @Override
-    public Map<HudsonJob, Map<jobData, Set<BaseModel>>> getInstanceJobs(String instanceUrl) {
+    public Map<HudsonJob, Map<jobData, Set<BaseModel>>> getInstanceJobs(String instanceUrl, HudsonCollector collector) {
         LOG.debug("Enter getInstanceJobs");
+        if (settings.isUseGroovy()) {
+            return getInstanceJobsGroovy(instanceUrl, collector);
+        }
         //Map<HudsonJob, Set<Build>> result = new LinkedHashMap<>();
         Map<HudsonJob, Map<jobData, Set<BaseModel>>> result = new LinkedHashMap<>();
-        
+
         int jobsCount = getJobsCount(instanceUrl);
         LOG.debug("Number of jobs " + jobsCount);
-        
+
         int i = 0, pageSize = settings.getPageSize();
         // Default pageSize to 1000 for backward compatibility of settings when pageSize defaults to 0
         if (pageSize <= 0) {
-        	pageSize = 1000;
+            pageSize = 1000;
         }
         while (i < jobsCount) {
-        	LOG.info("Fetching jobs " + i + "/" + jobsCount + " pageSize " + settings.getPageSize() + "...");
-        	
-	        try {
+            LOG.info("Fetching jobs " + i + "/" + jobsCount + " pageSize " + settings.getPageSize() + "...");
+
+            try {
                 String url = joinURL(instanceUrl, new String[]{API_SUFFIX + buildJobQueryString() + URLEncoder.encode("{" + i + "," + (i + pageSize) + "}", "UTF-8")});
-	            ResponseEntity<String> responseEntity = makeRestCall(url);
-	            if (responseEntity == null) {
-	            	break;
-	            }
-	            String returnJSON = responseEntity.getBody();
-	            if (StringUtils.isEmpty(returnJSON)) {
-	            	break;	            	
-	            }
-	            JSONParser parser = new JSONParser();
-	            
-	            try {
-	                JSONObject object = (JSONObject) parser.parse(returnJSON);
-	                JSONArray jobs = getJsonArray(object, "jobs");
-	                if (jobs.size() == 0) {
-	                	break;
-	                }
-	                
-	                for (Object job : jobs) {
-	                    JSONObject jsonJob = (JSONObject) job;
-	
-	                    final String jobName = getString(jsonJob, "name");
-	                    final String jobURL = getString(jsonJob, "url");
+                ResponseEntity<String> responseEntity = makeRestCall(url);
+                if (responseEntity == null) {
+                    break;
+                }
+                String returnJSON = responseEntity.getBody();
+                if (StringUtils.isEmpty(returnJSON)) {
+                    break;
+                }
+                JSONParser parser = new JSONParser();
+
+                try {
+                    JSONObject object = (JSONObject) parser.parse(returnJSON);
+                    JSONArray jobs = getJsonArray(object, "jobs");
+                    if (jobs.size() == 0) {
+                        break;
+                    }
+
+                    for (Object job : jobs) {
+                        JSONObject jsonJob = (JSONObject) job;
+
+                        final String jobName = getString(jsonJob, "name");
+                        final String jobURL = getString(jsonJob, "url");
                         final String jobClass = getString(jsonJob, "_class");
 
                         LOG.debug("Process jobName " + jobName + " jobURL " + jobURL + " jobClass " + jobClass);
 
-	                    recursiveGetJobDetails(jsonJob, jobName, jobURL, instanceUrl, parser, result);
-	                }
-	            } catch (ParseException e) {
-	                LOG.error("Parsing jobs details on instance: " + instanceUrl, e);
-	            }
-	        } catch (RestClientException rce) {
-	            LOG.error("client exception loading jobs details", rce);
-	            throw rce;
-	        } catch (UnsupportedEncodingException uee) {
-	        	LOG.error("unsupported encoding for loading jobs details", uee);
-			} catch (URISyntaxException e1) {
-			    LOG.error("wrong syntax url for loading jobs details", e1);
+                        recursiveGetJobDetails(jsonJob, jobName, jobURL, instanceUrl, parser, result);
+                    }
+                } catch (ParseException e) {
+                    LOG.error("Parsing jobs details on instance: " + instanceUrl, e);
+                }
+            } catch (RestClientException rce) {
+                LOG.error("client exception loading jobs details", rce);
+                throw rce;
+            } catch (UnsupportedEncodingException uee) {
+                LOG.error("unsupported encoding for loading jobs details", uee);
+            } catch (URISyntaxException e1) {
+                LOG.error("wrong syntax url for loading jobs details", e1);
             }
-	        
-	        i += pageSize;
+
+            i += pageSize;
         }
         return result;
     }
@@ -178,27 +236,28 @@ public class DefaultHudsonClient implements HudsonClient {
         });
         return query.toString();
     }
-    
+
     /**
      * Get number of jobs first so that we don't get 500 internal server error when paging with index out of bounds.
      * TODO: We get the jobs JSON without details and then get the size of the array. Is there a better way to get number of jobs for paging?
-     * @param 		instanceUrl
-     * @return		number of jobs
+     *
+     * @param instanceUrl
+     * @return number of jobs
      */
     private int getJobsCount(String instanceUrl) {
-    	int result = 0;
-    	
-    	try {
+        int result = 0;
+
+        try {
             String url = joinURL(instanceUrl, new String[]{JOBS_URL_SUFFIX});
             ResponseEntity<String> responseEntity = makeRestCall(url);
             if (responseEntity == null) {
-            	return result;
+                return result;
             }
             String returnJSON = responseEntity.getBody();
             if (StringUtils.isEmpty(returnJSON)) {
-            	return result;	            	
+                return result;
             }
-            JSONParser parser = new JSONParser();           
+            JSONParser parser = new JSONParser();
             try {
                 JSONObject object = (JSONObject) parser.parse(returnJSON);
                 JSONArray jobs = getJsonArray(object, "jobs");
@@ -210,14 +269,14 @@ public class DefaultHudsonClient implements HudsonClient {
             LOG.error("client exception loading jobs", rce);
             throw rce;
         } catch (URISyntaxException e1) {
-        	LOG.error("wrong syntax url for loading jobs", e1);
-		}
-    	return result;
+            LOG.error("wrong syntax url for loading jobs", e1);
+        }
+        return result;
     }
 
-    @SuppressWarnings({"PMD.NPathComplexity","PMD.ExcessiveMethodLength","PMD.AvoidBranchingStatementAsLastInLoop","PMD.EmptyIfStmt"})
-    private void recursiveGetJobDetails(JSONObject jsonJob, String jobName, String jobURL, String instanceUrl, 
-            JSONParser parser, Map<HudsonJob, Map<jobData, Set<BaseModel>>> result) {
+    @SuppressWarnings({"PMD.NPathComplexity", "PMD.ExcessiveMethodLength", "PMD.AvoidBranchingStatementAsLastInLoop", "PMD.EmptyIfStmt"})
+    private void recursiveGetJobDetails(JSONObject jsonJob, String jobName, String jobURL, String instanceUrl,
+                                        JSONParser parser, Map<HudsonJob, Map<jobData, Set<BaseModel>>> result) {
         LOG.debug("recursiveGetJobDetails: jobName " + jobName + " jobURL: " + jobURL);
 
         Map<jobData, Set<BaseModel>> jobDataMap = new HashMap();
@@ -229,11 +288,11 @@ public class DefaultHudsonClient implements HudsonClient {
 
         JSONArray jsonBuilds = getJsonArray(jsonJob, "builds");
         if (!jsonBuilds.isEmpty()) {
-    
+
             Set<BaseModel> builds = new LinkedHashSet<>();
             for (Object build : jsonBuilds) {
                 JSONObject jsonBuild = (JSONObject) build;
-    
+
                 // A basic Build object. This will be fleshed out later if this is a new Build.
                 String dockerLocalHostIP = settings.getDockerLocalHostIP();
                 String buildNumber = jsonBuild.get("number").toString();
@@ -242,7 +301,7 @@ public class DefaultHudsonClient implements HudsonClient {
                     Build hudsonBuild = new Build();
                     hudsonBuild.setNumber(buildNumber);
                     String buildURL = getString(jsonBuild, "url");
-    
+
                     //Modify localhost if Docker Natting is being done
                     if (!dockerLocalHostIP.isEmpty()) {
                         buildURL = buildURL.replace("localhost", dockerLocalHostIP);
@@ -250,7 +309,7 @@ public class DefaultHudsonClient implements HudsonClient {
                     } else {
                         LOG.debug(" Adding Build: " + buildURL);
                     }
-    
+
                     hudsonBuild.setBuildUrl(buildURL);
                     builds.add(hudsonBuild);
                 }
@@ -334,17 +393,17 @@ public class DefaultHudsonClient implements HudsonClient {
                     if (settings.isSaveLog()) {
                         build.setLog(getLog(buildUrl));
                     }
-                    
+
                     //For git SCM, add the repoBranches. For other SCM types, it's handled while adding changesets
                     build.getCodeRepos().addAll(getGitRepoBranch(buildJson));
-                    
+
                     boolean isPipelineJob = "org.jenkinsci.plugins.workflow.job.WorkflowRun".equals(getString(buildJson, "_class"));
-                    
+
                     // Need to handle duplicate changesets bug in Pipeline jobs (https://issues.jenkins-ci.org/browse/JENKINS-40352)
                     Set<String> commitIds = new HashSet<>();
                     // This is empty for git
                     Set<String> revisions = new HashSet<>();
-                    
+
                     if (isPipelineJob) {
                         for (Object changeSetObj : getJsonArray(buildJson, "changeSets")) {
                             JSONObject changeSet = (JSONObject) changeSetObj;
@@ -402,7 +461,7 @@ public class DefaultHudsonClient implements HudsonClient {
      * @param commitIds the commitIds
      * @param revisions the revisions
      */
-    private void addChangeSet(Build build, JSONObject changeSet, Set<String> commitIds, Set<String> revisions) {        
+    private void addChangeSet(Build build, JSONObject changeSet, Set<String> commitIds, Set<String> revisions) {
         String scmType = getString(changeSet, "kind");
         Map<String, RepoBranch> revisionToUrl = new HashMap<>();
 
@@ -435,7 +494,7 @@ public class DefaultHudsonClient implements HudsonClient {
                     scm.setScmUrl(repoBranch.getUrl());
                     scm.setScmBranch(repoBranch.getBranch());
                 }
-    
+
                 scm.setNumberOfChanges(getJsonArray(jsonItem, "paths").size());
                 build.getSourceChangeSet().add(scm);
                 commitIds.add(commitId);
@@ -451,76 +510,77 @@ public class DefaultHudsonClient implements HudsonClient {
 
     @SuppressWarnings("PMD")
     private List<RepoBranch> getGitRepoBranch(JSONObject buildJson) {
-        List<RepoBranch> list = new ArrayList<>();        
-        
+        List<RepoBranch> list = new ArrayList<>();
+
         JSONArray actions = getJsonArray(buildJson, "actions");
         for (Object action : actions) {
             JSONObject jsonAction = (JSONObject) action;
             if (jsonAction.size() > 0) {
                 JSONObject lastBuiltRevision = null;
                 JSONArray branches = null;
-                JSONArray remoteUrls = getJsonArray ((JSONObject) action, "remoteUrls");       
+                JSONArray remoteUrls = getJsonArray((JSONObject) action, "remoteUrls");
                 if (!remoteUrls.isEmpty()) {
-                	lastBuiltRevision = (JSONObject) jsonAction.get("lastBuiltRevision");
+                    lastBuiltRevision = (JSONObject) jsonAction.get("lastBuiltRevision");
                 }
                 if (lastBuiltRevision != null) {
-                	branches = getJsonArray (lastBuiltRevision, "branch");
+                    branches = getJsonArray(lastBuiltRevision, "branch");
                 }
                 // As of git plugin 3.0.0, when multiple repos are configured in the git plugin itself instead of MultiSCM plugin, 
-            	// they are stored unordered in a HashSet. So it's buggy and we cannot associate the correct branch information.
+                // they are stored unordered in a HashSet. So it's buggy and we cannot associate the correct branch information.
                 // So for now, we loop through all the remoteUrls and associate the built branch(es) with all of them.
                 if (branches != null && !branches.isEmpty()) {
-                	for (Object url : remoteUrls) {
-                		String sUrl = (String) url;
-                		if (sUrl != null && !sUrl.isEmpty()) {
-                			sUrl = removeGitExtensionFromUrl(sUrl);
-		                	for (Object branchObj : branches) {
-		                		String branchName = getString((JSONObject) branchObj, "name");
-		                		if (branchName != null) {
-		                			String unqualifiedBranchName = getUnqualifiedBranch(branchName);
-		                			RepoBranch grb = new RepoBranch(sUrl, unqualifiedBranchName, RepoBranch.RepoType.GIT);
-		                			list.add(grb);
-		                		}
-		                	}
-                		}
-                	}
+                    for (Object url : remoteUrls) {
+                        String sUrl = (String) url;
+                        if (sUrl != null && !sUrl.isEmpty()) {
+                            sUrl = removeGitExtensionFromUrl(sUrl);
+                            for (Object branchObj : branches) {
+                                String branchName = getString((JSONObject) branchObj, "name");
+                                if (branchName != null) {
+                                    String unqualifiedBranchName = getUnqualifiedBranch(branchName);
+                                    RepoBranch grb = new RepoBranch(sUrl, unqualifiedBranchName, RepoBranch.RepoType.GIT);
+                                    list.add(grb);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
         return list;
     }
-    
+
     private String removeGitExtensionFromUrl(String url) {
-    	String sUrl = url;
-    	//remove .git from the urls
-    	if (sUrl.endsWith(".git")) {
+        String sUrl = url;
+        //remove .git from the urls
+        if (sUrl.endsWith(".git")) {
             sUrl = sUrl.substring(0, sUrl.lastIndexOf(".git"));
         }
-    	return sUrl;
+        return sUrl;
     }
-    
+
     /**
      * Gets the unqualified branch name given the qualified one of the following forms:
      * 1. refs/remotes/<remote name>/<branch name>
      * 2. remotes/<remote name>/<branch name>
      * 3. origin/<branch name>
      * 4. <branch name>
+     *
      * @param qualifiedBranch
      * @return the unqualified branch name
      */
-        
+
     private String getUnqualifiedBranch(String qualifiedBranch) {
-    	String branchName = qualifiedBranch;
-    	Pattern pattern = Pattern.compile("(refs/)?remotes/[^/]+/(.*)|(origin[0-9]*/)?(.*)");
-    	Matcher matcher = pattern.matcher(branchName);
-    	if(matcher.matches()) {
-    		if (matcher.group(2) != null) {
-    			branchName = matcher.group(2);
-    		} else if (matcher.group(4) != null) {
-    			branchName = matcher.group(4);
-    		}
-    	}
-    	return branchName;
+        String branchName = qualifiedBranch;
+        Pattern pattern = Pattern.compile("(refs/)?remotes/[^/]+/(.*)|(origin[0-9]*/)?(.*)");
+        Matcher matcher = pattern.matcher(branchName);
+        if (matcher.matches()) {
+            if (matcher.group(2) != null) {
+                branchName = matcher.group(2);
+            } else if (matcher.group(4) != null) {
+                branchName = matcher.group(4);
+            }
+        }
+        return branchName;
     }
 
     private long getCommitTimestamp(JSONObject jsonItem) {
@@ -607,8 +667,41 @@ public class DefaultHudsonClient implements HudsonClient {
                 return BuildStatus.Unknown;
         }
     }
-    
-    @SuppressWarnings("PMD")
+
+    private String getUserInfo(String sUrl) throws URISyntaxException {
+        LOG.debug("Enter getUserInfo " + sUrl);
+        String userInfo = "";
+        List<String> servers = this.settings.getServers();
+        List<String> usernames = this.settings.getUsernames();
+        List<String> apiKeys = this.settings.getApiKeys();
+        if (CollectionUtils.isNotEmpty(servers) && CollectionUtils.isNotEmpty(usernames) && CollectionUtils.isNotEmpty(apiKeys)) {
+            boolean exactMatchFound = false;
+            for (int i = 0; i < servers.size(); i++) {
+                if ((servers.get(i) != null)) {
+                    String domain1 = getDomain(sUrl);
+                    String domain2 = getDomain(servers.get(i));
+                    if (StringUtils.isNotEmpty(domain1) && StringUtils.isNotEmpty(domain2) && Objects.equals(domain1, domain2)
+                            && getPort(sUrl) == getPort(servers.get(i))) {
+                        exactMatchFound = true;
+                    }
+                    if (exactMatchFound && (i < usernames.size()) && (i < apiKeys.size())
+                            && (StringUtils.isNotEmpty(usernames.get(i))) && (StringUtils.isNotEmpty(apiKeys.get(i)))) {
+                        userInfo = usernames.get(i) + ":" + apiKeys.get(i);
+                    }
+                    if (exactMatchFound) {
+                        break;
+                    }
+                }
+            }
+            if (!exactMatchFound) {
+                LOG.warn("Credentials for the following url was not found. This could happen if the domain/subdomain/IP address "
+                        + "in the build url returned by Jenkins and the Jenkins instance url in your Hygieia configuration do not match: "
+                        + "\"" + sUrl + "\"");
+            }
+        }
+        return userInfo;
+    }
+
     protected ResponseEntity<String> makeRestCall(String sUrl) throws URISyntaxException {
         LOG.debug("Enter makeRestCall " + sUrl);
         URI thisuri = URI.create(sUrl);
@@ -616,39 +709,12 @@ public class DefaultHudsonClient implements HudsonClient {
 
         //get userinfo from URI or settings (in spring properties)
         if (StringUtils.isEmpty(userInfo)) {
-        	List<String> servers = this.settings.getServers();
-        	List<String> usernames = this.settings.getUsernames();
-        	List<String> apiKeys = this.settings.getApiKeys();
-        	if (CollectionUtils.isNotEmpty(servers) && CollectionUtils.isNotEmpty(usernames) && CollectionUtils.isNotEmpty(apiKeys)) {
-        		boolean exactMatchFound = false;
-	        	for (int i = 0; i < servers.size(); i++) {
-	        		if ((servers.get(i) != null)) {
-	        			String domain1 = getDomain(sUrl);
-	        			String domain2 = getDomain(servers.get(i));
-	        			if (StringUtils.isNotEmpty(domain1) && StringUtils.isNotEmpty(domain2) && Objects.equals(domain1, domain2)
-	        					&& getPort(sUrl) == getPort(servers.get(i))) {
-	                		exactMatchFound = true;	
-	        			}
-	        			if (exactMatchFound && (i < usernames.size()) && (i < apiKeys.size()) 
-	        					&& (StringUtils.isNotEmpty(usernames.get(i))) && (StringUtils.isNotEmpty(apiKeys.get(i)))) {
-	        				userInfo = usernames.get(i) + ":" + apiKeys.get(i);
-        				}
-	        			if (exactMatchFound) {
-	        				break;
-	        			}
-	        		}
-	        	}	        	
-        		if (!exactMatchFound) {
-        			LOG.warn("Credentials for the following url was not found. This could happen if the domain/subdomain/IP address "
-        					+ "in the build url returned by Jenkins and the Jenkins instance url in your Hygieia configuration do not match: "
-        					+ "\"" + sUrl + "\"");
-        		}
-        	}
+            userInfo = getUserInfo(sUrl);
         }
         // Basic Auth only.
         if (StringUtils.isNotEmpty(userInfo)) {
             return rest.exchange(thisuri, HttpMethod.GET,
-                    new HttpEntity<>(createHeaders(userInfo)),
+                    new HttpEntity<>(createHeaders(userInfo, null)),
                     String.class);
         } else {
             return rest.exchange(thisuri, HttpMethod.GET, null,
@@ -656,24 +722,53 @@ public class DefaultHudsonClient implements HudsonClient {
         }
 
     }
-    
+
+
+    private ResponseEntity<String> makeRestCallPost(String sUrl, NameValue crumb, String script) throws URISyntaxException {
+
+        // Basic Auth only.
+        LOG.debug("Enter makeRestCall " + sUrl);
+        URI thisuri = URI.create(sUrl);
+        String userInfo = thisuri.getUserInfo();
+
+        if (StringUtils.isEmpty(userInfo)) {
+            userInfo = getUserInfo(sUrl);
+        }
+
+        MultiValueMap<String, String> parametersMap = new LinkedMultiValueMap<String, String>();
+        parametersMap.add("script", script);
+        if (StringUtils.isNotEmpty(userInfo)) {
+            return rest.exchange(thisuri, HttpMethod.POST,
+                    new HttpEntity<Object>(parametersMap, createHeaders(userInfo, crumb)),
+                    String.class);
+
+        } else {
+            return rest.exchange(thisuri, HttpMethod.POST, new HttpEntity<Object>(parametersMap, null),
+                    String.class);
+        }
+
+    }
+
     private String getDomain(String url) throws URISyntaxException {
         URI uri = new URI(url);
         return uri.getHost();
     }
-    
+
     private int getPort(String url) throws URISyntaxException {
         URI uri = new URI(url);
         return uri.getPort();
     }
 
-    protected HttpHeaders createHeaders(final String userInfo) {
+    protected HttpHeaders createHeaders(final String userInfo, NameValue crumb) {
         byte[] encodedAuth = Base64.encodeBase64(
                 userInfo.getBytes(StandardCharsets.US_ASCII));
         String authHeader = "Basic " + new String(encodedAuth);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.AUTHORIZATION, authHeader);
+        if (crumb != null) {
+            headers.add(crumb.getName(), crumb.getValue());
+        }
         return headers;
     }
 
@@ -681,8 +776,8 @@ public class DefaultHudsonClient implements HudsonClient {
         try {
             return makeRestCall(joinURL(buildUrl, new String[]{"consoleText"})).getBody();
         } catch (URISyntaxException e) {
-        	LOG.error("wrong syntax url for build log", e);
-		}
+            LOG.error("wrong syntax url for build log", e);
+        }
 
         return "";
     }

@@ -58,6 +58,7 @@ public class HudsonCollectorTaskTests {
     private static final String SERVER1 = "server1";
     private static final String NICENAME1 = "niceName1";
     private static final String ENVIONMENT1 = "DEV";
+    private static final HudsonCollector collector = new HudsonCollector();
 
     @Test
     public void collect_noBuildServers_nothingAdded() {
@@ -68,17 +69,17 @@ public class HudsonCollectorTaskTests {
 
     @Test
     public void collect_noJobsOnServer_nothingAdded() {
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(new HashMap<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>>());
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(new HashMap<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>>());
         when(dbComponentRepository.findAll()).thenReturn(components());
         task.collect(collectorWithOneServer());
 
-        verify(hudsonClient).getInstanceJobs(SERVER1);
+        verify(hudsonClient).getInstanceJobs(SERVER1, collector);
         verifyNoMoreInteractions(hudsonClient, buildRepository);
     }
 
     @Test
     public void collect_twoJobs_jobsAdded() {
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(twoJobsWithTwoBuilds(SERVER1, NICENAME1));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(twoJobsWithTwoBuilds(SERVER1, NICENAME1));
         when(dbComponentRepository.findAll()).thenReturn(components());
         List<HudsonJob> hudsonJobs = new ArrayList<>();
         HudsonJob hudsonJob = hudsonJob("1", SERVER1, "JOB1_URL", NICENAME1);
@@ -90,7 +91,7 @@ public class HudsonCollectorTaskTests {
 
     @Test
     public void collect_twoJobs_jobsAdded_random_order() {
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(twoJobsWithTwoBuilds(SERVER1, NICENAME1));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(twoJobsWithTwoBuilds(SERVER1, NICENAME1));
         when(dbComponentRepository.findAll()).thenReturn(components());
         List<HudsonJob> hudsonJobs = new ArrayList<>();
         HudsonJob hudsonJob = hudsonJob("2", SERVER1, "JOB2_URL", NICENAME1);
@@ -105,7 +106,7 @@ public class HudsonCollectorTaskTests {
     public void collect_oneJob_exists_notAdded() {
         HudsonCollector collector = collectorWithOneServer();
         HudsonJob job = hudsonJob("1", SERVER1, "JOB1_URL", NICENAME1);
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(oneJobWithBuilds(job));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(oneJobWithBuilds(job));
         when(hudsonJobRepository.findJob(collector.getId(), SERVER1, job.getJobName()))
                 .thenReturn(job);
         when(dbComponentRepository.findAll()).thenReturn(components());
@@ -129,7 +130,7 @@ public class HudsonCollectorTaskTests {
         jobs.add(job2);
         Set<ObjectId> udId = new HashSet<>();
         udId.add(collector.getId());
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(oneJobWithBuilds(job1));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(oneJobWithBuilds(job1));
         when(hudsonJobRepository.findByCollectorIdIn(udId)).thenReturn(jobs);
         when(dbComponentRepository.findAll()).thenReturn(components());
         task.collect(collector);
@@ -148,7 +149,7 @@ public class HudsonCollectorTaskTests {
         jobs.add(job1);
         Set<ObjectId> udId = new HashSet<>();
         udId.add(collector.getId());
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(oneJobWithBuilds(job1));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(oneJobWithBuilds(job1));
         when(hudsonJobRepository.findByCollectorIdIn(udId)).thenReturn(jobs);
         when(dbComponentRepository.findAll()).thenReturn(components());
         task.collect(collector);
@@ -161,7 +162,7 @@ public class HudsonCollectorTaskTests {
         HudsonJob job = hudsonJob("1", SERVER1, "JOB1_URL", NICENAME1);
         Build build = build("1", "JOB1_1_URL");
 
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(oneJobWithBuilds(job, build));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(oneJobWithBuilds(job, build));
         when(dbComponentRepository.findAll()).thenReturn(components());
         task.collect(collector);
 
@@ -174,7 +175,7 @@ public class HudsonCollectorTaskTests {
         HudsonJob job = hudsonJob("1", SERVER1, "JOB1_URL", NICENAME1);
         Build build = build("1", "JOB1_1_URL");
 
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(oneJobWithBuilds(job, build));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(oneJobWithBuilds(job, build));
         when(hudsonJobRepository.findEnabledJobs(collector.getId(), SERVER1))
                 .thenReturn(Arrays.asList(job));
         when(buildRepository.findByCollectorItemIdAndNumber(job.getId(), build.getNumber())).thenReturn(build);
@@ -190,7 +191,7 @@ public class HudsonCollectorTaskTests {
         HudsonJob job = hudsonJob("1", SERVER1, "JOB1_URL", NICENAME1);
         Build build = build("1", "JOB1_1_URL");
 
-        when(hudsonClient.getInstanceJobs(SERVER1)).thenReturn(oneJobWithBuilds(job, build));
+        when(hudsonClient.getInstanceJobs(SERVER1, collector)).thenReturn(oneJobWithBuilds(job, build));
         when(hudsonJobRepository.findEnabledJobs(collector.getId(), SERVER1))
                 .thenReturn(Arrays.asList(job));
         when(buildRepository.findByCollectorItemIdAndNumber(job.getId(), build.getNumber())).thenReturn(null);

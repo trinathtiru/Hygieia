@@ -2,6 +2,7 @@ package com.capitalone.dashboard.collector;
 
 import com.capitalone.dashboard.model.BaseModel;
 import com.capitalone.dashboard.model.Build;
+import com.capitalone.dashboard.model.HudsonCollector;
 import com.capitalone.dashboard.model.HudsonJob;
 
 import java.util.Map;
@@ -20,9 +21,10 @@ public interface HudsonClient {
      * populated.
      *
      * @param instanceUrl the URL for the Hudson instance
+     * @param collector
      * @return a summary of every build for each job on the instance
      */
-    Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> getInstanceJobs(String instanceUrl);
+    Map<HudsonJob, Map<HudsonClient.jobData, Set<BaseModel>>> getInstanceJobs(String instanceUrl, HudsonCollector collector);
 
     /**
      * Fetch full populated build information for a build.
