@@ -22,7 +22,7 @@
 
 <div align="center">
   <h2>
-    <a href="http://capitalone.github.io/Hygieia/getting_started.html"><img src="https://github.com/capitalone/Hygieia/blob/gh-pages/media/images/Buttons/Documentation.png" alt="Documentation" width="125" align="center"></a>
+    <a href="http://capitalone.github.io/Hygieia/getting_started.html"><img src="https://github.com/capitalone/Hygieia/blob/gh-pages/media/images/Buttons/Documentation.png" alt="Documenton" width="125" align="center"></a>
     <span>|</span>
     <a href="http://capitalone.github.io/Hygieia/screenshots.html"><img src="https://github.com/capitalone/Hygieia/blob/gh-pages/media/images/Buttons/Screenshots.png" alt="Screenshots" width="125" align="center"></a>
     <span>|</span>
